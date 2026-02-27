@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 
@@ -85,13 +85,19 @@ const INIT_CHATS: Record<number, ChatMessage[]> = {
   6: [{ id: 1, from: "them", text: "Посмотри этот мем 😂", time: "вс" }],
 };
 
-const FRIENDS = [
+const FRIENDS_INIT = [
   { id: 1, name: "Мария Иванова",   city: "СПб",          mutual: 12, online: true  },
   { id: 2, name: "Дмитрий Козлов", city: "Москва",        mutual: 8,  online: false },
   { id: 3, name: "Анна Петрова",   city: "Казань",        mutual: 5,  online: true  },
   { id: 4, name: "Игорь Новиков",  city: "Екатеринбург",  mutual: 3,  online: false },
   { id: 5, name: "Юля Белова",     city: "Новосибирск",   mutual: 15, online: true  },
   { id: 6, name: "Роман Сидоров",  city: "Москва",        mutual: 7,  online: false },
+];
+
+const REQUESTS_INIT = [
+  { id: 101, name: "Артём Волков",    city: "Краснодар",     mutual: 4,  online: true  },
+  { id: 102, name: "Наташа Кузьмина", city: "Санкт-Петербург", mutual: 9, online: false },
+  { id: 103, name: "Павел Орлов",     city: "Екатеринбург",  mutual: 2,  online: true  },
 ];
 
 const NOTIFICATIONS_LIST = [
@@ -102,12 +108,12 @@ const NOTIFICATIONS_LIST = [
   { id: 5, type: "birthday", user: "Юля Белова",     text: "сегодня день рождения! 🎂",     time: "сегодня", read: false },
 ];
 
-const NAV: { id: Page; icon: string; label: string; badge?: number }[] = [
-  { id: "profile",       icon: "User",          label: "Профиль"                },
-  { id: "messages",      icon: "MessageCircle", label: "Сообщения",  badge: 6  },
-  { id: "friends",       icon: "Users",         label: "Друзья",     badge: 1  },
-  { id: "notifications", icon: "Bell",          label: "Уведомления",badge: 3  },
-  { id: "settings",      icon: "Settings",      label: "Настройки"              },
+const NAV_BASE: { id: Page; icon: string; label: string }[] = [
+  { id: "profile",       icon: "User",          label: "Профиль"      },
+  { id: "messages",      icon: "MessageCircle", label: "Сообщения"    },
+  { id: "friends",       icon: "Users",         label: "Друзья"       },
+  { id: "notifications", icon: "Bell",          label: "Уведомления"  },
+  { id: "settings",      icon: "Settings",      label: "Настройки"    },
 ];
 
 /* ─────────────── УТИЛИТЫ ─────────────── */
@@ -434,7 +440,7 @@ function ProfilePage({ profile, onEditProfile, posts, onAddPost, onLike, onComme
                   <div className="flex gap-5 border-t border-border pt-3">
                     <button onClick={() => toggleLike(post.id)}
                       className={`flex items-center gap-1.5 text-sm transition-colors ${isLiked ? "text-red-400" : "text-muted-foreground hover:text-red-400"}`}>
-                      <Icon name={isLiked ? "Heart" : "Heart"} size={16} />
+                      <Icon name="Heart" size={16} />
                       <span>{post.likes + (isLiked ? 1 : 0)}</span>
                     </button>
                     <button onClick={() => setOpenComments(p => p.includes(post.id) ? p.filter(x => x !== post.id) : [...p, post.id])}
@@ -625,83 +631,156 @@ function MessagesPage({ profile, chats, setChats, onCall }: {
 }
 
 /* ─────────────── ДРУЗЬЯ ─────────────── */
-function FriendsPage({ onCall, onMessage }: { onCall: (t: "video"|"voice", name: string) => void; onMessage: () => void }) {
-  const [tab, setTab] = useState<"all"|"online"|"requests">("all");
-  const [search, setSearch] = useState("");
-  const [accepted, setAccepted] = useState(false);
-  const list = (tab === "online" ? FRIENDS.filter(f => f.online) : FRIENDS)
+function FriendsPage({ onCall, onMessage, onReqCountChange }: { onCall: (t: "video"|"voice", name: string) => void; onMessage: () => void; onReqCountChange: (n: number) => void }) {
+  const [tab, setTab]           = useState<"all"|"online"|"requests">("all");
+  const [search, setSearch]     = useState("");
+  const [friends, setFriends]   = useState(FRIENDS_INIT);
+  const [requests, setRequests] = useState(REQUESTS_INIT);
+  const [toasts, setToasts]     = useState<{ id: number; text: string; type: "ok"|"no" }[]>([]);
+
+  const showToast = (text: string, type: "ok"|"no") => {
+    const id = Date.now();
+    setToasts(p => [...p, { id, text, type }]);
+    setTimeout(() => setToasts(p => p.filter(x => x.id !== id)), 3000);
+  };
+
+  const acceptRequest = (req: typeof REQUESTS_INIT[0]) => {
+    const updated = requests.filter(r => r.id !== req.id);
+    setFriends(p => [...p, { ...req, id: req.id }]);
+    setRequests(updated);
+    onReqCountChange(updated.length);
+    showToast(`${req.name} теперь ваш друг!`, "ok");
+  };
+  const declineRequest = (req: typeof REQUESTS_INIT[0]) => {
+    const updated = requests.filter(r => r.id !== req.id);
+    setRequests(updated);
+    onReqCountChange(updated.length);
+    showToast(`Заявка от ${req.name.split(" ")[0]} отклонена`, "no");
+  };
+  const removeFriend = (id: number, name: string) => {
+    setFriends(p => p.filter(f => f.id !== id));
+    showToast(`${name.split(" ")[0]} удалён из друзей`, "no");
+  };
+
+  const list = (tab === "online" ? friends.filter(f => f.online) : friends)
     .filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="animate-fade-in">
+      {/* Тосты */}
+      <div className="fixed top-4 right-4 z-50 space-y-2 pointer-events-none">
+        {toasts.map(t => (
+          <div key={t.id} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-lg animate-fade-in ${t.type === "ok" ? "bg-emerald-500" : "bg-red-500"}`}>
+            <Icon name={t.type === "ok" ? "UserCheck" : "UserX"} size={16} fallback="Check" />
+            {t.text}
+          </div>
+        ))}
+      </div>
+
       <div className="relative mb-3">
         <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск друзей..." className="pl-9 bg-[hsl(var(--card))] border-transparent h-10 rounded-xl" />
       </div>
+
       <div className="flex gap-1 mb-5 bg-[hsl(var(--card))] rounded-xl p-1">
         {(["all","online","requests"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${tab === t ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-            {t === "all" ? "Все" : t === "online" ? "Онлайн" : (
-              <span className="flex items-center justify-center gap-1">Заявки {!accepted && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">1</span>}</span>
+            {t === "all" ? `Все (${friends.length})` : t === "online" ? "Онлайн" : (
+              <span className="flex items-center justify-center gap-1.5">
+                Заявки
+                {requests.length > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold">{requests.length}</span>}
+              </span>
             )}
           </button>
         ))}
       </div>
 
-      {tab === "requests" ? (
-        accepted ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <Icon name="UserCheck" size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Новых заявок нет</p>
+      {/* ЗАЯВКИ */}
+      {tab === "requests" && (
+        requests.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground">
+            <Icon name="UserCheck" size={48} className="mx-auto mb-3 opacity-20" />
+            <p className="text-sm font-medium">Новых заявок нет</p>
+            <p className="text-xs mt-1 opacity-60">Когда кто-то захочет подружиться — увидите здесь</p>
           </div>
         ) : (
-          <div className="bg-[hsl(var(--card))] rounded-2xl p-4 flex items-center gap-3">
-            <Ava name="Роман Сидоров" size="md" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold">Роман Сидоров</p>
-              <p className="text-xs text-muted-foreground">7 общих друзей · Москва</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setAccepted(true)} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90">Принять</button>
-              <button onClick={() => setAccepted(true)} className="px-3 py-1.5 rounded-lg bg-[hsl(var(--background))] text-muted-foreground text-xs font-semibold hover:text-foreground">Отклонить</button>
-            </div>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground px-1">{requests.length} {requests.length === 1 ? "заявка" : requests.length < 5 ? "заявки" : "заявок"} в ожидании</p>
+            {requests.map(req => (
+              <div key={req.id} className="bg-[hsl(var(--card))] rounded-2xl p-4 animate-fade-in">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="relative flex-shrink-0">
+                    <Ava name={req.name} size="md" />
+                    {req.online && <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[hsl(var(--card))]" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">{req.name}</p>
+                    <p className="text-xs text-muted-foreground">{req.city} · {req.mutual} общих друзей</p>
+                  </div>
+                  {req.online && <span className="text-[10px] text-emerald-400 font-medium">онлайн</span>}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => acceptRequest(req)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity active:scale-95"
+                  >
+                    <Icon name="UserCheck" size={15} /> Принять
+                  </button>
+                  <button
+                    onClick={() => declineRequest(req)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[hsl(var(--background))] text-muted-foreground text-sm font-semibold hover:text-red-400 hover:bg-red-400/10 transition-all active:scale-95"
+                  >
+                    <Icon name="UserX" size={15} /> Отклонить
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )
-      ) : list.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Icon name="Users" size={40} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">Никого не найдено</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {list.map(f => (
-            <div key={f.id} className="bg-[hsl(var(--card))] rounded-2xl p-3.5 flex items-center gap-3">
-              <div className="relative flex-shrink-0">
-                <Ava name={f.name} size="md" />
-                <OnlineDot online={f.online} />
+      )}
+
+      {/* СПИСОК ДРУЗЕЙ */}
+      {tab !== "requests" && (
+        list.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <Icon name="Users" size={40} className="mx-auto mb-3 opacity-30" />
+            <p className="text-sm">{search ? "Никого не найдено" : "Нет друзей онлайн"}</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {list.map(f => (
+              <div key={f.id} className="bg-[hsl(var(--card))] rounded-2xl p-3.5 flex items-center gap-3 group">
+                <div className="relative flex-shrink-0">
+                  <Ava name={f.name} size="md" />
+                  <OnlineDot online={f.online} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">{f.name}</p>
+                  <p className="text-xs text-muted-foreground">{f.city} · {f.mutual} общих</p>
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={() => onCall("voice", f.name)} title="Голосовой звонок"
+                    className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-emerald-400 hover:bg-emerald-400/10 transition-all">
+                    <Icon name="Phone" size={15} />
+                  </button>
+                  <button onClick={() => onCall("video", f.name)} title="Видеозвонок"
+                    className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-blue-400 hover:bg-blue-400/10 transition-all">
+                    <Icon name="Video" size={15} />
+                  </button>
+                  <button onClick={onMessage} title="Написать"
+                    className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all">
+                    <Icon name="MessageCircle" size={15} />
+                  </button>
+                  <button onClick={() => removeFriend(f.id, f.name)} title="Удалить из друзей"
+                    className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-all opacity-0 group-hover:opacity-100">
+                    <Icon name="UserMinus" size={15} />
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">{f.name}</p>
-                <p className="text-xs text-muted-foreground">{f.city} · {f.mutual} общих</p>
-              </div>
-              <div className="flex gap-1">
-                <button onClick={() => onCall("voice", f.name)} title="Позвонить"
-                  className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-emerald-400 transition-colors">
-                  <Icon name="Phone" size={15} />
-                </button>
-                <button onClick={() => onCall("video", f.name)} title="Видеозвонок"
-                  className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-blue-400 transition-colors">
-                  <Icon name="Video" size={15} />
-                </button>
-                <button onClick={onMessage}
-                  className="w-8 h-8 rounded-full bg-[hsl(var(--background))] flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
-                  <Icon name="MessageCircle" size={15} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );
@@ -819,78 +898,164 @@ function SettingsPage({ profile, onEditProfile, onLogout }: { profile: UserProfi
 }
 
 /* ─────────────── ЗВОНОК ─────────────── */
-function CallOverlay({ call, onEnd }: { call: NonNullable<CallState>; onEnd: () => void }) {
-  const [muted, setMuted]   = useState(false);
-  const [camOff, setCamOff] = useState(false);
-  const [speaker, setSpeaker] = useState(true);
-  const [secs, setSecs]     = useState(0);
 
-  useState(() => {
+function CallOverlay({ call, onEnd }: { call: NonNullable<CallState>; onEnd: () => void }) {
+  const [muted,   setMuted]   = useState(false);
+  const [camOff,  setCamOff]  = useState(false);
+  const [speaker, setSpeaker] = useState(true);
+  const [secs,    setSecs]    = useState(0);
+  const [phase,   setPhase]   = useState<"connecting"|"active">("connecting");
+
+  useEffect(() => {
+    const connect = setTimeout(() => setPhase("active"), 2000);
+    return () => clearTimeout(connect);
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "active") return;
     const t = setInterval(() => setSecs(s => s + 1), 1000);
     return () => clearInterval(t);
-  });
+  }, [phase]);
 
-  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`;
+  const fmt = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`;
+
+  const isVideo = call.type === "video";
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "linear-gradient(160deg,#0f0f1a,#12182b,#0a1020)" }}>
-      <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "radial-gradient(circle at 30% 20%, #3b82f6 0%,transparent 50%),radial-gradient(circle at 70% 80%,#6366f1 0%,transparent 50%)" }} />
-      <div className="relative flex-1 flex flex-col items-center justify-between py-16 px-6">
-        <div className="text-center">
-          <p className="text-white/50 text-sm mb-5">{call.type === "video" ? "Видеозвонок" : "Голосовой звонок"}</p>
-          <div className="animate-pulse-ring inline-block rounded-full mb-4">
-            <Ava name={call.name} size="xl" />
-          </div>
-          <h2 className="text-2xl font-bold text-white">{call.name}</h2>
-          <p className="text-white/50 text-sm mt-2 font-mono tracking-widest">{secs > 0 ? fmt(secs) : "Соединение..."}</p>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: isVideo ? "linear-gradient(160deg,#0a0a12,#0d1420,#080e1a)" : "linear-gradient(160deg,#0f0f1a,#12182b,#0a1020)" }}>
+      {/* Фоновые блики */}
+      <div className="absolute inset-0 opacity-25 pointer-events-none" style={{ backgroundImage: isVideo ? "radial-gradient(circle at 20% 30%, #1d4ed8 0%,transparent 45%),radial-gradient(circle at 80% 70%,#7c3aed 0%,transparent 45%)" : "radial-gradient(circle at 30% 25%, #059669 0%,transparent 50%),radial-gradient(circle at 75% 75%,#0284c7 0%,transparent 50%)" }} />
+
+      {/* Шапка */}
+      <div className="relative flex items-center justify-between px-5 pt-12 pb-4">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur">
+          <span className={`w-2 h-2 rounded-full ${phase === "active" ? "bg-emerald-400" : "bg-yellow-400 animate-pulse"}`} />
+          <span className="text-white/80 text-xs font-medium">
+            {isVideo ? "Видеозвонок" : "Голосовой звонок"}
+          </span>
         </div>
-
-        {call.type === "video" && (
-          <div className="w-full max-w-sm h-44 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center relative overflow-hidden backdrop-blur">
-            {camOff
-              ? <div className="text-white/40 flex flex-col items-center gap-2"><Icon name="VideoOff" size={36} /><p className="text-sm">Камера выключена</p></div>
-              : <div className="text-white/40 flex flex-col items-center gap-2"><Icon name="Video" size={36} className="text-blue-400" /><p className="text-sm">Ваша камера</p></div>
-            }
-            <div className="absolute top-3 right-3 w-16 h-12 bg-white/10 rounded-xl flex items-center justify-center">
-              <Ava name={call.name} size="sm" />
-            </div>
-          </div>
+        {phase === "active" && (
+          <span className="text-white/60 text-sm font-mono tabular-nums">{fmt(secs)}</span>
         )}
+      </div>
 
-        <div className="flex gap-5 items-center">
-          <button onClick={() => setMuted(!muted)}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border ${muted ? "bg-red-500/20 border-red-500/40 text-red-400" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}>
-            <Icon name={muted ? "MicOff" : "Mic"} size={22} fallback="Mic" />
-          </button>
-          <button onClick={onEnd} className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all shadow-xl shadow-red-500/40 active:scale-95">
-            <Icon name="PhoneOff" size={26} className="text-white" />
-          </button>
-          {call.type === "video" ? (
-            <button onClick={() => setCamOff(!camOff)}
-              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border ${camOff ? "bg-red-500/20 border-red-500/40 text-red-400" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}>
-              <Icon name={camOff ? "VideoOff" : "Video"} size={22} fallback="Video" />
-            </button>
+      {/* Видео / Голос */}
+      {isVideo ? (
+        <div className="relative flex-1 mx-4 rounded-3xl overflow-hidden bg-black/40 backdrop-blur border border-white/10">
+          {camOff ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/30">
+              <Icon name="VideoOff" size={56} />
+              <p className="text-sm">Камера выключена</p>
+            </div>
           ) : (
-            <button onClick={() => setSpeaker(!speaker)}
-              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border ${!speaker ? "bg-red-500/20 border-red-500/40 text-red-400" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}>
-              <Icon name={speaker ? "Volume2" : "VolumeX"} size={22} fallback="Volume2" />
-            </button>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/30">
+              <Icon name="Video" size={56} className="text-blue-400/50" />
+              <p className="text-sm">Ваша камера</p>
+            </div>
+          )}
+          {/* Мини-окно собеседника */}
+          <div className="absolute top-4 right-4 w-24 h-18 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20 overflow-hidden" style={{ height: "72px" }}>
+            <Ava name={call.name} size="md" />
+          </div>
+          {/* Имя собеседника */}
+          <div className="absolute bottom-4 left-4">
+            <p className="text-white font-bold text-lg">{call.name}</p>
+            <p className="text-white/50 text-xs">{phase === "connecting" ? "Соединение..." : "В разговоре"}</p>
+          </div>
+        </div>
+      ) : (
+        /* Голосовой — центральный аватар */
+        <div className="flex-1 flex flex-col items-center justify-center gap-6">
+          <div className={`relative ${phase === "active" ? "animate-pulse-ring" : ""}`}>
+            <div className="w-28 h-28 rounded-full bg-gradient-to-br from-blue-500 to-indigo-700 flex items-center justify-center text-3xl font-black text-white shadow-2xl shadow-blue-500/30">
+              {call.name.split(" ").map(n => n[0]).join("").toUpperCase()}
+            </div>
+            {phase === "active" && (
+              <div className="absolute inset-0 rounded-full border-2 border-emerald-400/40 animate-ping" />
+            )}
+          </div>
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-white">{call.name}</h2>
+            <p className="text-white/50 text-sm mt-1 font-mono">
+              {phase === "connecting" ? "Звоним..." : fmt(secs)}
+            </p>
+          </div>
+          {/* Визуализация звука */}
+          {phase === "active" && !muted && (
+            <div className="flex gap-1 items-end h-8">
+              {[3,6,4,8,5,7,3,6,5,4,7,6].map((h, i) => (
+                <div key={i} className="w-1 rounded-full bg-emerald-400/60" style={{ height: `${h * 3}px`, animation: `waveBar 0.8s ease-in-out ${i * 0.07}s infinite alternate` }} />
+              ))}
+            </div>
           )}
         </div>
+      )}
+
+      {/* Кнопки управления */}
+      <div className="relative pb-14 pt-6 px-8">
+        <div className="flex items-center justify-center gap-5">
+          {/* Микрофон */}
+          <div className="flex flex-col items-center gap-1">
+            <button onClick={() => setMuted(!muted)}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border-2 ${muted ? "bg-red-500/20 border-red-400 text-red-400" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}>
+              <Icon name={muted ? "MicOff" : "Mic"} size={22} fallback="Mic" />
+            </button>
+            <span className="text-white/40 text-[10px]">{muted ? "Вкл. микр." : "Микрофон"}</span>
+          </div>
+
+          {/* Завершить */}
+          <div className="flex flex-col items-center gap-1">
+            <button onClick={onEnd}
+              className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-all shadow-2xl shadow-red-500/50 active:scale-95">
+              <Icon name="PhoneOff" size={28} className="text-white" />
+            </button>
+            <span className="text-white/40 text-[10px]">Завершить</span>
+          </div>
+
+          {/* Камера (видео) / Громкость (голос) */}
+          <div className="flex flex-col items-center gap-1">
+            {isVideo ? (
+              <>
+                <button onClick={() => setCamOff(!camOff)}
+                  className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border-2 ${camOff ? "bg-red-500/20 border-red-400 text-red-400" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}>
+                  <Icon name={camOff ? "VideoOff" : "Video"} size={22} fallback="Video" />
+                </button>
+                <span className="text-white/40 text-[10px]">{camOff ? "Вкл. камеру" : "Камера"}</span>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setSpeaker(!speaker)}
+                  className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border-2 ${!speaker ? "bg-red-500/20 border-red-400 text-red-400" : "bg-white/10 border-white/20 text-white hover:bg-white/20"}`}>
+                  <Icon name={speaker ? "Volume2" : "VolumeX"} size={22} fallback="Volume2" />
+                </button>
+                <span className="text-white/40 text-[10px]">Динамик</span>
+              </>
+            )}
+          </div>
+        </div>
       </div>
+
+      <style>{`
+        @keyframes waveBar {
+          from { transform: scaleY(0.4); }
+          to   { transform: scaleY(1.2); }
+        }
+      `}</style>
     </div>
   );
 }
 
 /* ─────────────── ГЛАВНЫЙ КОМПОНЕНТ ─────────────── */
 export default function Index() {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [page, setPage]         = useState<Page>("profile");
-  const [call, setCall]         = useState<CallState>(null);
-  const [profile, setProfile]   = useState<UserProfile>(INIT_PROFILE);
-  const [posts, setPosts]       = useState<Post[]>(INIT_POSTS);
-  const [chats, setChats]       = useState<Record<number, ChatMessage[]>>(INIT_CHATS);
-  const [editOpen, setEditOpen] = useState(false);
+  const [loggedIn, setLoggedIn]   = useState(false);
+  const [page, setPage]           = useState<Page>("profile");
+  const [call, setCall]           = useState<CallState>(null);
+  const [profile, setProfile]     = useState<UserProfile>(INIT_PROFILE);
+  const [posts, setPosts]         = useState<Post[]>(INIT_POSTS);
+  const [chats, setChats]         = useState<Record<number, ChatMessage[]>>(INIT_CHATS);
+  const [editOpen, setEditOpen]   = useState(false);
+  const [reqCount, setReqCount]   = useState(REQUESTS_INIT.length);
 
   if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />;
 
@@ -902,6 +1067,14 @@ export default function Index() {
   const handleComment = (postId: number, text: string) => setPosts(p => p.map(x => x.id === postId
     ? { ...x, comments: [...x.comments, { id: Date.now(), author: profile.name, text, time: "только что" }] } : x
   ));
+
+  const NAV = NAV_BASE.map(n => ({
+    ...n,
+    badge: n.id === "friends" ? (reqCount > 0 ? reqCount : undefined)
+         : n.id === "messages" ? 6
+         : n.id === "notifications" ? 3
+         : undefined,
+  }));
 
   const totalBadge = NAV.reduce((s, n) => s + (n.badge || 0), 0);
 
@@ -973,7 +1146,7 @@ export default function Index() {
             <MessagesPage profile={profile} chats={chats} setChats={setChats} onCall={handleCall} />
           )}
           {page === "friends" && (
-            <FriendsPage onCall={handleCall} onMessage={() => setPage("messages")} />
+            <FriendsPage onCall={handleCall} onMessage={() => setPage("messages")} onReqCountChange={setReqCount} />
           )}
           {page === "notifications" && <NotificationsPage />}
           {page === "settings" && (
